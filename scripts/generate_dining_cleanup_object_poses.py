@@ -8,7 +8,7 @@ fixed scene objects in DiningCleanupEnvCfg.
 World layout:
     - table footprint: x=[0.0, 0.70], y=[-0.65, 0.0]
     - +x is the Franka-view right side; -x is the Franka-view left side
-    - bowl/spoon initial regions are compact left-side clusters
+    - bowl/spoon initial region is a shared left-side dirty-area region
 
 The loader converts raw anchor-frame XY to world XY by adding
 ANCHOR_WORLD_POSE[:2], so this script writes raw tvec values.
@@ -27,11 +27,10 @@ ANCHOR_WORLD_POSE = (0.40, 0.10, 0.0)
 DEFAULT_OUTPUT = Path("data/dining_clean/dining_cleanup_object_poses_500.json")
 DEFAULT_VIDEO_NAME = "synthetic_dining_cleanup_poses.mp4"
 
-BOWL_WORLD_X_RANGE = (0.10, 0.16)
-BOWL_WORLD_Y_RANGE = (-0.30, -0.24)
-SPOON_WORLD_X_RANGE = (0.11, 0.15)
-SPOON_WORLD_Y_RANGE = (-0.50, -0.46)
+OBJECT_WORLD_X_RANGE = (0.10, 0.24)
+OBJECT_WORLD_Y_RANGE = (-0.50, -0.22)
 MIN_CLEARANCE = 0.015
+MAX_PAIR_DISTANCE = 0.28
 
 # Top-down footprints after applying the task spawn scale in
 # DiningCleanupEnvCfg.  Bowl/spoon can yaw per episode, so overlap rejection
@@ -42,7 +41,7 @@ FOOTPRINT_SIZE = {
     "tray": (0.240, 0.260),
     "tissue": (0.073, 0.103),
     "vase": (0.100, 0.100),
-    "cloth": (0.164, 0.098),
+    "cloth": (0.069, 0.115),
 }
 
 # Fixed objects from DiningCleanupEnvCfg.  Bowl/spoon are sampled on the left
@@ -95,9 +94,20 @@ def valid_object_xy(name: str, point: tuple[float, float]) -> bool:
 
 
 def sample_pair(rng: random.Random) -> tuple[tuple[float, float], tuple[float, float]]:
-    for _ in range(2000):
-        bowl_xy = random_world_xy(rng, x_range=BOWL_WORLD_X_RANGE, y_range=BOWL_WORLD_Y_RANGE)
-        spoon_xy = random_world_xy(rng, x_range=SPOON_WORLD_X_RANGE, y_range=SPOON_WORLD_Y_RANGE)
+    min_pair_distance = footprint_radius("bowl") + footprint_radius("spoon") + MIN_CLEARANCE
+    for _ in range(5000):
+        bowl_xy = random_world_xy(rng, x_range=OBJECT_WORLD_X_RANGE, y_range=OBJECT_WORLD_Y_RANGE)
+        pair_distance = rng.uniform(min_pair_distance, MAX_PAIR_DISTANCE)
+        pair_theta = rng.uniform(-math.pi, math.pi)
+        spoon_xy = (
+            bowl_xy[0] + pair_distance * math.cos(pair_theta),
+            bowl_xy[1] + pair_distance * math.sin(pair_theta),
+        )
+        if not (
+            OBJECT_WORLD_X_RANGE[0] <= spoon_xy[0] <= OBJECT_WORLD_X_RANGE[1]
+            and OBJECT_WORLD_Y_RANGE[0] <= spoon_xy[1] <= OBJECT_WORLD_Y_RANGE[1]
+        ):
+            continue
         if not valid_object_xy("bowl", bowl_xy) or not valid_object_xy("spoon", spoon_xy):
             continue
         if not footprints_clear("bowl", bowl_xy, "spoon", spoon_xy):
@@ -183,6 +193,7 @@ def summarize(entries: list[dict]) -> None:
         "scaled footprint clearance min="
         f"{footprint_radius('bowl') + footprint_radius('spoon') + MIN_CLEARANCE:.3f}"
     )
+    print(f"configured bowl-spoon max distance={MAX_PAIR_DISTANCE:.3f}")
     for name in ("tray", "tissue", "vase", "cloth", "bowl", "spoon"):
         sx, sy = FOOTPRINT_SIZE[name]
         print(f"{name} scaled footprint: {sx:.3f} x {sy:.3f} m")
@@ -191,7 +202,7 @@ def summarize(entries: list[dict]) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate dining cleanup object poses.")
     parser.add_argument("--count", type=int, default=500, help="Number of full episodes to generate.")
-    parser.add_argument("--seed", type=int, default=2026053001, help="Deterministic random seed.")
+    parser.add_argument("--seed", type=int, default=2026053002, help="Deterministic random seed.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Output JSON path.")
     parser.add_argument("--video-name", default=DEFAULT_VIDEO_NAME)
     return parser.parse_args()

@@ -78,7 +78,7 @@ _DROP_Y_OFFSET_PER_OBJECT: dict[str, float] = {
 _LEFT_TABLE_X_RANGE = (0.04, 0.22)
 _LEFT_TABLE_Y_RANGE = (-0.50, -0.15)
 _WIPE_LANES_X = (0.08, 0.135, 0.19)
-_CLOTH_FOOTPRINT_SIZE = (0.164, 0.098)
+_CLOTH_FOOTPRINT_SIZE = (0.069, 0.115)
 _WIPE_COVERAGE_THRESHOLD = 0.90
 _STATIC_OBJECT_XY_TOL = 0.035
 _STATIC_OBJECT_INITIAL_XY = {
@@ -239,7 +239,7 @@ class DiningCleanupStateMachine(StateMachineBase):
     Behavior:
     1. Grasp the bowl by an edge-facing target and place it in the tray +y zone.
     2. Grasp the spoon and place it in the tray -y zone.
-    3. Grasp the cloth, lower it to the table, and sweep five y-axis lanes over
+    3. Grasp the cloth, lower it to the table, and sweep three y-axis lanes over
        the left table region where the bowl/spoon originally started.
 
     The action vector is ``[panda_joint1, ..., panda_joint7, gripper]``.

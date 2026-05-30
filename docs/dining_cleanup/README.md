@@ -109,18 +109,17 @@ cloth:  y = -0.49
 bowl/spoon 由 `object_poses` 隨 episode 隨機生成。generator 中的 world XY 範圍為：
 
 ```text
-bowl x = [0.10, 0.16]
-bowl y = [-0.30, -0.24]
-spoon x = [0.11, 0.15]
-spoon y = [-0.50, -0.46]
+bowl/spoon shared x = [0.10, 0.24]
+bowl/spoon shared y = [-0.50, -0.22]
 ```
 
-這些位置位於桌面左半側，採用較集中的兩個 cluster。bowl/spoon 仍會依 scaled footprint 半徑做 rejection sampling，避免彼此或固定物件重疊。
+這些位置位於桌面左半側 dirty area。generator 會先隨機放 bowl，再在 bowl 周圍採樣 spoon，使兩者不要過度分離，同時保留多樣性。
 
 額外限制：
 
 - bowl/spoon 與 tray/tissue/vase/cloth 依 scaled footprint 半徑避免重疊。
 - bowl 與 spoon 之間的最小中心距離目前為 `0.195 m`，等於 bowl 半徑 `0.080` + spoon 半徑 `0.100` + clearance `0.015`。
+- bowl 與 spoon 的最大中心距離目前為 `0.280 m`，避免兩者初始位置過度分離。
 - 只生成 `status == "full"` 的 episode
 
 ### 物件大小與 footprint 設定
@@ -133,16 +132,16 @@ spoon y = [-0.50, -0.46]
 
 Raw USD bbox 與 task scale：
 
-| 物件 | raw USD bbox size | task spawn scale | scaled XY footprint |
-|------|-------------------|------------------|---------------------|
+| 物件 | raw USD bbox size | task spawn scale / rot | scaled world XY footprint |
+|------|-------------------|------------------------|---------------------------|
 | bowl | `0.280 x 0.280 x 0.130 m` | `(0.57, 0.57, 0.57)` | `0.160 x 0.160 m` |
 | spoon | `0.066 x 0.323 x 0.032 m` | `(0.62, 0.62, 0.62)` | `0.041 x 0.200 m` |
 | tray | `0.304 x 0.147 x 0.054 m` | `(0.79, 1.77, 1.00)` | `0.240 x 0.260 m` |
 | tissue | `0.073 x 0.103 x 0.050 m` | `(1.00, 1.00, 1.00)` | `0.073 x 0.103 m` |
 | vase | `0.100 x 0.100 x 0.114 m` | `(1.00, 1.00, 1.00)` | `0.100 x 0.100 m` |
-| cloth | `1.641 x 0.984 x 0.000 m` | `(0.10, 0.10, 1.00)` | `0.164 x 0.098 m` |
+| cloth | `1.641 x 0.984 x 0.000 m` | `(0.07, 0.07, 1.00)`, z yaw `90 deg` | `0.069 x 0.115 m` |
 
-注意：cloth 目前 mesh bbox 的 z 厚度為 `0.000 m`，視覺化與 XY 避碰沒有問題；如果 PhysX collision 發生不穩定，應改成有薄厚度的 cloth/collider USD。
+Franka gripper 初始最大開口約為 `0.04 + 0.04 = 0.08 m`。原本 cloth 窄邊約 `0.098 m`，偏大；目前縮小並旋轉後窄邊約 `0.069 m`，可由夾爪夾取窄邊。注意：cloth 目前 mesh bbox 的 z 厚度為 `0.000 m`，視覺化與 XY 避碰沒有問題；如果 PhysX collision 發生不穩定，應改成有薄厚度的 cloth/collider USD。
 
 ## Object Pose 生成
 
@@ -177,7 +176,7 @@ python3 scripts/generate_dining_cleanup_object_poses.py \
 ```bash
 python3 scripts/generate_dining_cleanup_object_poses.py \
   --count 500 \
-  --seed 2026053001 \
+  --seed 2026053002 \
   --output data/dining_clean/dining_cleanup_object_poses_500.json
 ```
 
@@ -221,12 +220,13 @@ python3 scripts/generate_dining_cleanup_object_poses.py \
 
 ```text
 episodes = 500
-bowl world x = [0.100, 0.160]
-bowl world y = [-0.300, -0.240]
-spoon world x = [0.110, 0.150]
-spoon world y = [-0.500, -0.460]
-bowl-spoon world XY distance = [0.195, 0.259]
+bowl world x = [0.100, 0.218]
+bowl world y = [-0.500, -0.220]
+spoon world x = [0.100, 0.201]
+spoon world y = [-0.500, -0.220]
+bowl-spoon world XY distance = [0.195, 0.277]
 scaled footprint clearance min = 0.195
+configured bowl-spoon max distance = 0.280
 ```
 
 ### 驗證 object pose loader
@@ -316,16 +316,16 @@ python3 scripts/visualize_dining_cleanup_layout.py \
 執行 visualization 後會印出：
 
 ```text
-bowl: n=500, x=[0.100, 0.160], y=[-0.300, -0.240]
-spoon: n=500, x=[0.110, 0.150], y=[-0.500, -0.460]
+bowl: n=500, x=[0.100, 0.218], y=[-0.500, -0.220]
+spoon: n=500, x=[0.100, 0.201], y=[-0.500, -0.220]
 table: x=[0.000, 0.700], y=[-0.650, 0.000]
 wipe region: x=[0.040, 0.220], y=[-0.500, -0.150]
-planned cloth/table coverage: 100.0%
+planned cloth/table coverage: 96.9%
 tray success zone: x=[0.450, 0.690], y=[-0.490, -0.230]
 tray scaled footprint: 0.240 x 0.260 m
 tissue scaled footprint: 0.073 x 0.103 m
 vase scaled footprint: 0.100 x 0.100 m
-cloth scaled footprint: 0.164 x 0.098 m
+cloth scaled footprint: 0.069 x 0.115 m
 bowl scaled footprint: 0.160 x 0.160 m
 spoon scaled footprint: 0.041 x 0.200 m
 ```
@@ -428,7 +428,7 @@ x = [0.04, 0.22]
 y = [-0.50, -0.15]
 ```
 
-擦拭採用 3 條 y-axis lanes，並以 cloth 的 scaled footprint `0.164 x 0.098 m` 規劃安全距離：
+擦拭採用 3 條 y-axis lanes，並以 cloth 的 scaled footprint `0.069 x 0.115 m` 規劃安全距離：
 
 ```text
 x lanes = [0.08, 0.135, 0.19]
@@ -442,7 +442,7 @@ lane 1: y high -> y low
 lane 2: y low  -> y high
 ```
 
-最右 lane 的 cloth 右緣約為 `0.272 m`，低於 vase/tissue 左側安全界線，因此擦拭時不會掃到 tissue 或 vase。以 cloth swept footprint 計算，目標擦拭區 `x=[0.04, 0.22]`, `y=[-0.50, -0.15]` 的 planned coverage 為 `100.0%`。FSM 與 env success 目前使用 `90%` coverage threshold。
+最右 lane 的 cloth 右緣約為 `0.225 m`，低於 vase/tissue 左側安全界線，因此擦拭時不會掃到 tissue 或 vase。以 cloth swept footprint 計算，目標擦拭區 `x=[0.04, 0.22]`, `y=[-0.50, -0.15]` 的 planned coverage 為 `96.9%`。FSM 與 env success 目前使用 `90%` coverage threshold。
 
 ### FSM phase 與 duration
 

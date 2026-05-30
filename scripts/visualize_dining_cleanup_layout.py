@@ -45,7 +45,7 @@ FOOTPRINT_SIZE = {
     "tray": (0.240, 0.260),
     "tissue": (0.073, 0.103),
     "vase": (0.100, 0.100),
-    "cloth": (0.164, 0.098),
+    "cloth": (0.069, 0.115),
 }
 
 DEFAULT_INPUT = Path("data/dining_clean/dining_cleanup_object_poses_500.json")

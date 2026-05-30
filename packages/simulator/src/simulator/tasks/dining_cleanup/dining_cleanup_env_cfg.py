@@ -34,8 +34,14 @@ SPOON_SCALE: tuple[float, float, float] = (0.62, 0.62, 0.62)
 TRAY_SCALE: tuple[float, float, float] = (0.79, 1.77, 1.0)
 TISSUE_SCALE: tuple[float, float, float] = (1.0, 1.0, 1.0)
 VASE_SCALE: tuple[float, float, float] = (1.0, 1.0, 1.0)
-CLOTH_SCALE: tuple[float, float, float] = (0.10, 0.10, 1.0)
-CLOTH_FOOTPRINT_SIZE: tuple[float, float] = (0.164, 0.098)
+CLOTH_SCALE: tuple[float, float, float] = (0.07, 0.07, 1.0)
+CLOTH_WORLD_ROT: tuple[float, float, float, float] = (
+    math.sqrt(0.5),
+    0.0,
+    0.0,
+    math.sqrt(0.5),
+)
+CLOTH_FOOTPRINT_SIZE: tuple[float, float] = (0.069, 0.115)
 
 # UMI/object_poses entries.  Only bowl/spoon are randomized per replay episode;
 # tray, tissue, vase, and cloth are part of the task scene with fixed initial
@@ -148,7 +154,7 @@ class DiningCleanupSceneCfg(SingleArmFrankaTaskSceneCfg):
         prim_path="{ENV_REGEX_NS}/Scene/cloth",
         init_state=RigidObjectCfg.InitialStateCfg(
             pos=CLOTH_WORLD_POS,
-            rot=(1.0, 0.0, 0.0, 0.0),
+            rot=CLOTH_WORLD_ROT,
         ),
         spawn=sim_utils.UsdFileCfg(
             usd_path=str(CLOTH_USD_PATH),
