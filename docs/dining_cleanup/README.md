@@ -46,12 +46,12 @@ HCIS-DiningCleanup-SingleArm-v0
 
 ### 使用的 USD assets
 
-所有物件 USD 都位於：
+餐具、托盤與固定障礙物 USD 位於：
 
 ```text
 packages/simulator/assets/scenes/dining_room/objects/
 ```
-Google drivve link: https://drive.google.com/drive/folders/1FHOizW83ahsts2zrd36hD3e29t2Z2hLI?usp=drive_link
+Google Drive link: https://drive.google.com/drive/folders/1FHOizW83ahsts2zrd36hD3e29t2Z2hLI?usp=drive_link
 本任務使用：
 
 ```text
@@ -60,8 +60,9 @@ spoon/model_Kitchen_Spoon_B008H2JLP8_LargeWooden_69323.usd
 tray/model_WhiteUtensilTray_69323.usd
 tissue/model_tissue_001_69323.usd
 vase/model_BlackVaseSmall_1_69323.usd
-cloth/model_tablecloth.usd
 ```
+
+cloth 目前改用 `sim_utils.CuboidCfg` 建立穩定的薄片 rigid object，避免原本 `model_tablecloth.usd` 的 particle-cloth schema 在 simulator 啟動時造成初始位置漂移。
 
 ### 桌面座標系
 
@@ -92,16 +93,16 @@ packages/simulator/src/simulator/tasks/dining_cleanup/dining_cleanup_env_cfg.py
 | 物件 | world position |
 |------|----------------|
 | tray | `(0.57, -0.36, 0.05)` |
-| tissue | `(0.35, -0.18, 0.074)` |
-| vase | `(0.35, -0.32, 0.05)` |
-| cloth | `(0.35, -0.49, 0.05)` |
+| tissue | `(0.35, -0.12, 0.074)` |
+| vase | `(0.35, -0.26, 0.05)` |
+| cloth | `(0.35, -0.43, 0.056)` |
 
 中間區域的 y 順序符合需求：
 
 ```text
-tissue: y = -0.18
-vase:   y = -0.32
-cloth:  y = -0.49
+tissue: y = -0.12
+vase:   y = -0.26
+cloth:  y = -0.43
 ```
 
 也就是從 y 大到小依序為 tissue、vase、cloth。
@@ -126,24 +127,24 @@ bowl/spoon shared y = [-0.50, -0.22]
 
 ### 物件大小與 footprint 設定
 
-更新後的 USD asset 已可用 USD API 讀到 mesh bounding box。原始尺寸中，cloth asset 是桌巾大小，raw footprint 約 `1.641 x 0.984 m`，比桌面還大；如果不縮放會直接超出桌面。因此 task config 會對部分物件套用 spawn scale，並以縮放後 footprint 做：
+更新後的 USD asset 已可用 USD API 讀到 mesh bounding box。bowl、spoon、tray、tissue、vase 會從 USD 載入並套用 task spawn scale；cloth 則改用薄片 cuboid rigid object，避免原始 particle-cloth USD 在 simulator 啟動時漂移。因此 task config 會以實際 spawn 後的 footprint 做：
 
 - object pose 生成時避免重疊
 - visualization 中顯示桌面佔據大小
 - tray success zone 估計
 
-Raw USD bbox 與 task scale：
+USD bbox / task geometry 與 task scale：
 
-| 物件 | raw USD bbox size | task spawn scale / rot | scaled world XY footprint |
+| 物件 | raw USD bbox size / task geometry | task spawn scale / rot | scaled world XY footprint |
 |------|-------------------|------------------------|---------------------------|
 | bowl | `0.280 x 0.280 x 0.130 m` | `(0.57, 0.57, 0.57)` | `0.160 x 0.160 m` |
 | spoon | `0.066 x 0.323 x 0.032 m` | `(0.62, 0.62, 0.62)` | `0.041 x 0.200 m` |
 | tray | `0.304 x 0.147 x 0.054 m` | `(0.79, 1.77, 1.00)` | `0.240 x 0.260 m` |
 | tissue | `0.073 x 0.103 x 0.050 m` | `(1.00, 1.00, 1.00)` | `0.073 x 0.103 m` |
 | vase | `0.100 x 0.100 x 0.114 m` | `(1.00, 1.00, 1.00)` | `0.100 x 0.100 m` |
-| cloth | `1.641 x 0.984 x 0.000 m` | `(0.07, 0.07, 1.00)`, z yaw `90 deg` | `0.069 x 0.115 m` |
+| cloth | `CuboidCfg(size=(0.055, 0.115, 0.012))` | no USD scale / no z yaw | `0.055 x 0.115 m` |
 
-Franka gripper 初始最大開口約為 `0.04 + 0.04 = 0.08 m`。原本 cloth 窄邊約 `0.098 m`，偏大；目前縮小並旋轉後窄邊約 `0.069 m`，可由夾爪夾取窄邊。注意：cloth 目前 mesh bbox 的 z 厚度為 `0.000 m`，視覺化與 XY 避碰沒有問題；如果 PhysX collision 發生不穩定，應改成有薄厚度的 cloth/collider USD。
+Franka gripper 初始最大開口約為 `0.04 + 0.04 = 0.08 m`。目前 cloth cuboid 的窄邊為 `0.055 m`，可由夾爪夾取窄邊；z 厚度為 `0.012 m`，讓 PhysX 在啟動時有穩定的薄片碰撞幾何。
 
 ## Object Pose 生成
 
@@ -220,11 +221,11 @@ python3 scripts/generate_dining_cleanup_object_poses.py \
 
 ```text
 episodes = 500
-bowl world x = [0.100, 0.218]
+bowl world x = [0.100, 0.219]
 bowl world y = [-0.500, -0.220]
-spoon world x = [0.100, 0.201]
+spoon world x = [0.101, 0.191]
 spoon world y = [-0.500, -0.220]
-bowl-spoon world XY distance = [0.195, 0.277]
+bowl-spoon world XY distance = [0.195, 0.278]
 scaled footprint clearance min = 0.195
 configured bowl-spoon max distance = 0.280
 ```
@@ -246,7 +247,7 @@ cfg = ObjectPoseConfig(
     object_z=0.05,
     object_roll=0.0,
     object_pitch=0.0,
-    per_object_yaw_offset={"bowl": 0.0, "spoon": 1.5707963267948966},
+    per_object_yaw_offset={"bowl": 0.0, "spoon": 4.71238898038469},
     use_fixed_yaw=False,
 )
 
@@ -314,16 +315,16 @@ python3 scripts/visualize_dining_cleanup_layout.py \
 執行 visualization 後會印出：
 
 ```text
-bowl: n=500, x=[0.100, 0.218], y=[-0.500, -0.220]
-spoon: n=500, x=[0.100, 0.201], y=[-0.500, -0.220]
+bowl: n=500, x=[0.100, 0.219], y=[-0.500, -0.220]
+spoon: n=500, x=[0.101, 0.191], y=[-0.500, -0.220]
 table: x=[0.000, 0.700], y=[-0.650, 0.000]
 wipe region: x=[0.040, 0.220], y=[-0.500, -0.150]
-planned cloth/table coverage: 96.9%
+planned cloth/table coverage: 91.7%
 tray success zone: x=[0.450, 0.690], y=[-0.490, -0.230]
 tray scaled footprint: 0.240 x 0.260 m
 tissue scaled footprint: 0.073 x 0.103 m
 vase scaled footprint: 0.100 x 0.100 m
-cloth scaled footprint: 0.069 x 0.115 m
+cloth scaled footprint: 0.055 x 0.115 m
 bowl scaled footprint: 0.160 x 0.160 m
 spoon scaled footprint: 0.041 x 0.200 m
 ```
@@ -400,7 +401,7 @@ spoon 採用較小 retreat：
 _GRASP_RETREAT_PER_OBJECT["spoon"] = 0.020
 ```
 
-spoon 的 grasp yaw 會根據 spoon object yaw，加上 `pi/2` 與小範圍 random yaw offset。
+spoon 的 object pose yaw 會在 env config 中加上 `3*pi/2`，也就是原本 USD heading correction 再額外旋轉 180 度。FSM 的 grasp yaw 會根據這個 spoon object yaw，再加上 `_GRASP_YAW_OFFSET = pi/2` 與小範圍 random yaw offset。
 
 ### Cloth 夾取與擦拭設計
 
@@ -416,7 +417,7 @@ _grasp_anchor_w("cloth") = cloth center
 cloth 固定起始位置：
 
 ```text
-cloth = (0.35, -0.49, 0.05)
+cloth = (0.35, -0.43, 0.056)
 ```
 
 擦拭區域：
@@ -426,7 +427,7 @@ x = [0.04, 0.22]
 y = [-0.50, -0.15]
 ```
 
-擦拭採用 3 條 y-axis lanes，並以 cloth 的 scaled footprint `0.069 x 0.115 m` 規劃安全距離：
+擦拭採用 3 條 y-axis lanes，並以 cloth 的 scaled footprint `0.055 x 0.115 m` 規劃安全距離：
 
 ```text
 x lanes = [0.08, 0.135, 0.19]
@@ -440,7 +441,7 @@ lane 1: y high -> y low
 lane 2: y low  -> y high
 ```
 
-最右 lane 的 cloth 右緣約為 `0.225 m`，低於 vase/tissue 左側安全界線，因此擦拭時不會掃到 tissue 或 vase。以 cloth swept footprint 計算，目標擦拭區 `x=[0.04, 0.22]`, `y=[-0.50, -0.15]` 的 planned coverage 為 `96.9%`。FSM 與 env success 目前使用 `90%` coverage threshold。
+最右 lane 的 cloth 右緣約為 `0.218 m`，低於 vase/tissue 左側安全界線，因此擦拭時不會掃到 tissue 或 vase。以 cloth swept footprint 計算，目標擦拭區 `x=[0.04, 0.22]`, `y=[-0.50, -0.15]` 的 planned coverage 為 `91.7%`。FSM 與 env success 目前使用 `90%` coverage threshold。
 
 ### FSM phase 與 duration
 

@@ -88,10 +88,12 @@ The fixed object positions are:
 
 ```text
 tray   = (0.57, -0.36, 0.05)
-tissue = (0.35, -0.18, 0.074)
-vase   = (0.35, -0.32, 0.05)
-cloth  = (0.35, -0.49, 0.05)
+tissue = (0.35, -0.12, 0.074)
+vase   = (0.35, -0.26, 0.05)
+cloth  = (0.35, -0.43, 0.056)
 ```
+
+In the current implementation, the cloth is represented as a thin rigid cuboid rather than the original particle-cloth USD asset. This avoids startup drift from particle-cloth dynamics while preserving the intended wiping footprint.
 
 ## Environment Settings and Dataset Generation
 
@@ -179,10 +181,10 @@ wipe y range = [-0.50, -0.15]
 The cloth footprint is approximated as:
 
 ```text
-cloth footprint = 0.069 m x 0.115 m
+cloth footprint = 0.055 m x 0.115 m
 ```
 
-This lane design covers approximately 96.9 percent of the target wipe region under the planned footprint model, while keeping the cloth footprint away from the tissue and vase area. The success threshold is currently set to 90 percent coverage.
+This lane design covers approximately 91.7 percent of the target wipe region under the planned footprint model, while keeping the cloth footprint away from the tissue and vase area. The success threshold is currently set to 90 percent coverage.
 
 ## Expected Outcome and Evaluation
 

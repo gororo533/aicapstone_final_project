@@ -31,21 +31,15 @@ SPOON_USD_PATH = DINING_OBJECTS_ROOT / "spoon" / "model_Kitchen_Spoon_B008H2JLP8
 TRAY_USD_PATH = DINING_OBJECTS_ROOT / "tray" / "model_WhiteUtensilTray_69323.usd"
 TISSUE_USD_PATH = DINING_OBJECTS_ROOT / "tissue" / "model_tissue_001_69323.usd"
 VASE_USD_PATH = DINING_OBJECTS_ROOT / "vase" / "model_BlackVaseSmall_1_69323.usd"
-CLOTH_USD_PATH = DINING_OBJECTS_ROOT / "cloth" / "model_tablecloth.usd"
 
 BOWL_SCALE: tuple[float, float, float] = (0.57, 0.57, 0.57)
 SPOON_SCALE: tuple[float, float, float] = (0.62, 0.62, 0.62)
 TRAY_SCALE: tuple[float, float, float] = (0.79, 1.77, 1.0)
 TISSUE_SCALE: tuple[float, float, float] = (1.0, 1.0, 1.0)
 VASE_SCALE: tuple[float, float, float] = (1.0, 1.0, 1.0)
-CLOTH_SCALE: tuple[float, float, float] = (0.07, 0.07, 1.0)
-CLOTH_WORLD_ROT: tuple[float, float, float, float] = (
-    math.sqrt(0.5),
-    0.0,
-    0.0,
-    math.sqrt(0.5),
-)
-CLOTH_FOOTPRINT_SIZE: tuple[float, float] = (0.069, 0.115)
+CLOTH_FOOTPRINT_SIZE: tuple[float, float] = (0.055, 0.115)
+CLOTH_THICKNESS: float = 0.012
+CLOTH_SIZE: tuple[float, float, float] = (*CLOTH_FOOTPRINT_SIZE, CLOTH_THICKNESS)
 RIGID_PROPS = RigidBodyPropertiesCfg(
     disable_gravity=False,
     max_depenetration_velocity=5.0,
@@ -71,7 +65,9 @@ def _ensure_rigid_object_schemas(root_prim: Usd.Prim) -> None:
             UsdPhysics.CollisionAPI.Apply(prim)
             PhysxSchema.PhysxCollisionAPI.Apply(prim)
             mesh_collision = UsdPhysics.MeshCollisionAPI.Apply(prim)
-            mesh_collision.CreateApproximationAttr().Set("convexHull")
+            # mesh_collision.CreateApproximationAttr().Set("convexHull")
+            approximation = "convexDecomposition" if root_prim.GetName() == "bowl" or root_prim.GetName() == "tray" else "convexHull"
+            mesh_collision.CreateApproximationAttr().Set(approximation)
             collision_count += 1
 
     if collision_count == 0:
@@ -123,7 +119,8 @@ OBJECT_ROLL: float = 0.0
 OBJECT_PITCH: float = 0.0
 PER_OBJECT_YAW_OFFSET: dict[str, float] = {
     "bowl": 0.0,
-    "spoon": math.pi / 2.0,
+    # USD heading correction plus an additional 180-degree rotation requested for placement.
+    "spoon": 3.0 * math.pi / 2.0,
 }
 
 # Dining-room table footprint in task/world XY is approximately
@@ -143,9 +140,9 @@ WIPE_CONTACT_Z_RANGE: tuple[float, float] = (0.03, 0.13)
 STATIC_OBJECT_XY_TOL: float = 0.035
 
 TRAY_WORLD_POS: tuple[float, float, float] = (0.57, -0.36, TABLE_SURFACE_Z)
-TISSUE_WORLD_POS: tuple[float, float, float] = (0.35, -0.18, 0.074)
-VASE_WORLD_POS: tuple[float, float, float] = (0.35, -0.32, TABLE_SURFACE_Z)
-CLOTH_WORLD_POS: tuple[float, float, float] = (0.35, -0.49, TABLE_SURFACE_Z)
+TISSUE_WORLD_POS: tuple[float, float, float] = (0.35, -0.12, 0.074)
+VASE_WORLD_POS: tuple[float, float, float] = (0.35, -0.26, TABLE_SURFACE_Z)
+CLOTH_WORLD_POS: tuple[float, float, float] = (0.35, -0.43, TABLE_SURFACE_Z + 0.5 * CLOTH_THICKNESS)
 
 
 @configclass
@@ -174,7 +171,7 @@ class DiningCleanupSceneCfg(SingleArmFrankaTaskSceneCfg):
         prim_path="{ENV_REGEX_NS}/Scene/spoon",
         init_state=RigidObjectCfg.InitialStateCfg(
             pos=(0.22, -0.42, 0.05),
-            rot=(1.0, 0.0, 0.0, 0.0),
+            rot=(0.0, 0.0, 0.0, 1.0),
         ),
         spawn=sim_utils.UsdFileCfg(
             func=_spawn_rigid_usd,
@@ -238,15 +235,17 @@ class DiningCleanupSceneCfg(SingleArmFrankaTaskSceneCfg):
         prim_path="{ENV_REGEX_NS}/Scene/cloth",
         init_state=RigidObjectCfg.InitialStateCfg(
             pos=CLOTH_WORLD_POS,
-            rot=CLOTH_WORLD_ROT,
+            rot=(1.0, 0.0, 0.0, 0.0),
         ),
-        spawn=sim_utils.UsdFileCfg(
-            func=_spawn_rigid_usd,
-            usd_path=str(CLOTH_USD_PATH),
-            scale=CLOTH_SCALE,
+        spawn=sim_utils.CuboidCfg(
+            size=CLOTH_SIZE,
             rigid_props=RIGID_PROPS,
             collision_props=COLLISION_PROPS,
             mass_props=MassPropertiesCfg(mass=0.03),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.08, 0.12, 0.85),
+                roughness=0.8,
+            ),
         ),
     )
 

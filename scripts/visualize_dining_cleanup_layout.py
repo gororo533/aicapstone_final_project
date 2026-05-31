@@ -26,9 +26,9 @@ LEFT_TABLE_Y_RANGE = (-0.50, -0.15)
 WIPE_LANES_X = (0.08, 0.135, 0.19)
 
 TRAY_WORLD_POS = (0.57, -0.36)
-TISSUE_WORLD_POS = (0.35, -0.18)
-VASE_WORLD_POS = (0.35, -0.32)
-CLOTH_WORLD_POS = (0.35, -0.49)
+TISSUE_WORLD_POS = (0.35, -0.12)
+VASE_WORLD_POS = (0.35, -0.26)
+CLOTH_WORLD_POS = (0.35, -0.43)
 
 TRAY_SUCCESS_X_HALF_WIDTH = 0.12
 TRAY_SUCCESS_Y_HALF_WIDTH = 0.13
@@ -45,7 +45,7 @@ FOOTPRINT_SIZE = {
     "tray": (0.240, 0.260),
     "tissue": (0.073, 0.103),
     "vase": (0.100, 0.100),
-    "cloth": (0.069, 0.115),
+    "cloth": (0.055, 0.115),
 }
 
 DEFAULT_INPUT = Path("data/dining_clean/dining_cleanup_object_poses_500.json")

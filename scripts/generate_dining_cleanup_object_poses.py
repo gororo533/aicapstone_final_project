@@ -41,16 +41,16 @@ FOOTPRINT_SIZE = {
     "tray": (0.240, 0.260),
     "tissue": (0.073, 0.103),
     "vase": (0.100, 0.100),
-    "cloth": (0.069, 0.115),
+    "cloth": (0.055, 0.115),
 }
 
 # Fixed objects from DiningCleanupEnvCfg.  Bowl/spoon are sampled on the left
 # side and kept away from these objects by footprint radius.
 STATIC_WORLD_XY = (
     ("tray", (0.57, -0.36)),
-    ("tissue", (0.35, -0.18)),
-    ("vase", (0.35, -0.32)),
-    ("cloth", (0.35, -0.49)),
+    ("tissue", (0.35, -0.12)),
+    ("vase", (0.35, -0.26)),
+    ("cloth", (0.35, -0.43)),
 )
 
 
