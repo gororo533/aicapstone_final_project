@@ -2,299 +2,172 @@
 
 ## Overview
 
-The advanced task extends the entry-level cutlery arrangement task into a post-meal dining cleanup scenario. A Franka robot arm must clear a dining table by moving a bowl and a spoon into a tray, then grasp a cloth and wipe the dirty area of the table. The table also contains protected objects, currently a tissue box and a vase, that should remain in place throughout the episode.
+This advanced-level task studies post-meal dining cleanup with a single Franka robot arm. The robot is required to clear tableware from a dining table, place the tableware into a tray, retrieve a wiping cloth, and wipe a specified dirty region of the table. At the same time, it must preserve non-target objects such as a tissue box and a vase, which may be present on the table but should not be moved or collected.
 
-Compared with the entry-level task, this task is more demanding because it combines sequential object manipulation, object category distinction, constrained placement, cloth-mediated table wiping, and obstacle preservation. The robot must not simply move every object on the table. It must identify which objects are task targets, which objects are tools, and which objects are protected scene objects.
-
-The current implementation is registered as:
-
-```text
-HCIS-DiningCleanup-SingleArm-v0
-```
+Compared with the entry-level cutlery arrangement task, this task introduces a more complex manipulation setting. The robot must reason about object roles, perform a sequence of dependent subtasks, use a tool for surface cleaning, and satisfy safety constraints. The task is therefore not simply an object transport problem; it is a constrained, multi-stage manipulation problem that combines tableware clearing, tool use, surface coverage, and disturbance avoidance.
 
 ## Motivation
 
-Dining cleanup is a common household activity that is repetitive but still requires structured physical reasoning. A useful assistive robot should be able to remove tableware, preserve non-target objects, and clean the table surface after a meal. This is relevant for home assistance, elder care, mobility assistance, and service robotics.
+Dining cleanup is a common and repetitive household activity. A robot capable of clearing tableware and wiping a table surface could reduce the physical burden of daily chores and support practical applications in home assistance, elder care, mobility assistance, and service robotics.
 
-The entry-level project focuses on pre-meal setup: placing a fork and knife around a plate. The advanced task instead focuses on post-meal cleanup. This shift changes the problem from a single placement objective into a multi-stage manipulation problem with explicit constraints on object identity, placement region, wiping coverage, and disturbance avoidance.
+The entry-level project focuses on pre-meal arrangement, where the robot places utensils around a plate. The advanced task extends the setting to post-meal cleanup. This changes the objective from placing objects in predefined positions to completing a structured cleanup procedure under constraints. The robot must distinguish target objects from protected objects, execute multiple manipulation stages in the correct order, and clean a surface area rather than only reaching a point target.
 
 ## Problem Formulation
 
-We formulate dining cleanup as a finite-horizon manipulation task. At each timestep `t`, the environment state `s_t` contains the robot joint state, gripper state, object poses, camera observations, and task progress. The policy receives observations `o_t` from the Franka proprioceptive state and enabled cameras, and outputs an action `a_t` controlling the arm and gripper.
+We formulate dining cleanup as a finite-horizon constrained manipulation problem. At each timestep \(t\), the environment has a state \(s_t\), which includes the robot configuration, gripper state, object poses, table state, and task progress. The robot receives an observation \(o_t\), which may include proprioceptive information and visual observations, and outputs an action \(a_t\) to control the arm and gripper.
 
-For the current Franka task, the action vector is:
+The goal is to learn or design a policy:
 
 ```text
-[panda_joint1, ..., panda_joint7, gripper]
+pi(a_t | o_t)
 ```
 
-The objective is to learn or script a policy `pi(a_t | o_t)` that completes the following ordered task:
+that maximizes the probability of completing the cleanup task within a fixed episode horizon while satisfying placement, wiping, and safety constraints.
 
-1. Move the bowl into the tray.
-2. Move the spoon into the tray.
-3. Grasp the cloth.
-4. Wipe the target dirty region on the left side of the table.
-5. Keep the protected objects, tissue and vase, within a small displacement tolerance.
+### Task Objective
 
-The task is successful only if all required subgoals are satisfied at the end of the episode:
+The robot must complete the following high-level objectives:
+
+1. Identify the tableware objects that should be cleared.
+2. Move each target tableware object into the tray.
+3. Retrieve the cloth after the tableware has been cleared.
+4. Wipe the designated dirty region of the table.
+5. Avoid disturbing protected objects and avoid dropping task objects.
+
+The task is successful only when all required subgoals are satisfied:
 
 ```text
-Success = placement_success
-          AND wipe_success
+Success = tableware_clearing
+          AND wiping_coverage
           AND protected_object_stability
-          AND no_object_drop
+          AND object_safety
 ```
 
-### Objects and Roles
-Object USD files: https://drive.google.com/drive/folders/1FHOizW83ahsts2zrd36hD3e29t2Z2hLI?usp=drive_link
-The current scene contains six task-relevant objects:
+### Object Roles
 
-| Object | Role | Current placement policy |
-|--------|------|--------------------------|
-| bowl | target object to clear | randomized by `object_poses` |
-| spoon | target object to clear | randomized by `object_poses` |
-| tray | target placement region | fixed |
-| cloth | wiping tool | fixed |
-| tissue | protected object | fixed |
-| vase | protected object | fixed |
+The scene contains objects with different semantic roles:
 
-Only the bowl and spoon are randomized per episode. The tray, cloth, tissue, and vase are fixed in the current environment to make the advanced task focus on manipulation sequencing, target-object cleanup, and wiping behavior.
+| Object Type | Role in the Task |
+|-------------|------------------|
+| Bowl and spoon | Target tableware to be cleared |
+| Tray | Receptacle for cleared tableware |
+| Cloth | Tool used for wiping the table |
+| Tissue box and vase | Protected non-target objects |
 
-### Workspace Definition
+This role distinction is central to the task. The robot should manipulate target tableware and the cleaning tool, but it should not treat protected objects as cleanup targets.
 
-The dining table is represented in world XY coordinates:
+### Task Constraints
 
-```text
-table x range = [0.00, 0.70]
-table y range = [-0.65, 0.00]
-table surface z = 0.05
-```
+The task includes the following constraints:
 
-The convention used by the current task is:
+1. Target tableware must be placed inside the tray region.
+2. The dirty table region must be wiped with sufficient coverage.
+3. Protected objects must remain near their initial poses.
+4. The robot should avoid severe collisions and should not push objects off the table.
+5. The wiping stage should occur after the tableware clearing stage, because uncleared tableware may block the wiping region.
 
-```text
-+x = Franka-view right side
--x = Franka-view left side
-```
+These constraints make the task more challenging than independent pick-and-place. A successful policy must coordinate sequencing, grasping, placement, and wiping behavior under a shared workspace.
 
-The target dirty region to wipe is the left side of the table:
+## Environment and Data Generation
 
-```text
-wipe x range = [0.04, 0.22]
-wipe y range = [-0.50, -0.15]
-```
+The environment consists of a dining table, a Franka robot arm, target tableware, a tray, a cloth, and protected objects. The target tableware is initialized at varying tabletop positions to test robustness across different cleanup layouts. The tray, cloth, and protected objects define the structure of the task scene and provide stable reference roles for placement, tool use, and disturbance evaluation.
 
-The fixed object positions are:
+Training and evaluation data can be generated from two complementary sources:
 
-```text
-tray   = (0.57, -0.36, 0.05)
-tissue = (0.35, -0.12, 0.074)
-vase   = (0.35, -0.26, 0.05)
-cloth  = (0.35, -0.43, 0.075)
-```
+1. Expert demonstrations that execute the intended cleanup sequence.
+2. Human teleoperation demonstrations that capture manual corrections and realistic interaction patterns.
 
-In the current implementation, the cloth is represented as a rigid cuboid rather than the original particle-cloth USD asset. Its current geometry is `0.055 m x 0.115 m x 0.050 m`, which avoids startup drift from particle-cloth dynamics while preserving the intended wiping footprint and improving graspability.
+The generated episodes should record the robot observations, actions, object states, and final task outcome. These data can then be used for imitation learning, policy evaluation, and failure analysis.
 
-## Environment Settings and Dataset Generation
+## Proposed Approach
 
-### Environment Settings
+The proposed solution follows a staged manipulation strategy. The policy should first complete tableware clearing and then perform table wiping. This decomposition reflects the physical structure of the task: the robot should remove objects from the dirty region before attempting to wipe it.
 
-The scene is based on the dining room table environment. The Franka robot is placed in front of the table and operates over a constrained tabletop workspace. The environment is configured in:
+### Stage 1: Tableware Clearing
 
-```text
-packages/simulator/src/simulator/tasks/dining_cleanup/dining_cleanup_env_cfg.py
-```
+In the first stage, the robot identifies the target tableware objects and transports them into the tray. The policy must decide which object to grasp, approach it with a stable grasp configuration, lift it safely, and release it inside the tray. This stage tests object recognition, object-specific grasping, transport stability, and constrained placement.
 
-The task uses `RigidObjectCfg` objects for the bowl, spoon, tray, tissue, vase, and cloth. The camera-enabled setup provides wrist and front camera observations when launched with `--enable_cameras`.
+### Stage 2: Table Wiping
 
-### Object Pose Generation
-
-The current object pose generator creates randomized bowl and spoon initial poses. The generator is:
-
-```text
-scripts/generate_dining_cleanup_object_poses.py
-```
-
-The default generated file is:
-
-```text
-data/dining_clean/dining_cleanup_object_poses_500.json
-```
-
-The current generator samples bowl and spoon world positions in the dirty-area region:
-
-```text
-object world x range = [0.10, 0.24]
-object world y range = [-0.50, -0.22]
-```
-
-The generator also enforces clearance constraints so that the bowl and spoon do not overlap each other or the fixed objects. The generated data follows the existing `object_poses` schema and is loaded through the task's `ObjectPoseConfig`. The anchor configuration is:
-
-```text
-anchor tag id = 0
-anchor world pose = (0.40, 0.10, 0.0)
-tag-to-object mapping = {1: bowl, 2: spoon}
-```
-
-### Demonstration Generation
-
-Two demonstration sources are supported:
-
-1. Scripted finite-state-machine demonstrations through `scripts/datagen/generate.py`.
-2. Human keyboard teleoperation through `scripts/teleop.py`.
-
-The scripted FSM is implemented in:
-
-```text
-packages/simulator/src/simulator/datagen/state_machine/dining_cleanup.py
-```
-
-It generates trajectories for bowl pickup and placement, spoon pickup and placement, cloth pickup, and table wiping. Teleoperation is used for manual inspection and small-scale human demonstrations.
-
-## Planned Implementation Approach
-
-The current implementation follows two stages: tableware clearing and table wiping.
-
-### Stage 1: Clear the Tableware
-
-The robot first clears the target tableware into the tray. The scripted order is:
-
-1. Move above the bowl.
-2. Approach the bowl with an edge-biased grasp target.
-3. Close the gripper.
-4. Lift the bowl.
-5. Move above the tray.
-6. Place the bowl in the tray on the `+y` side of the tray center.
-7. Repeat the same sequence for the spoon, placing it on the `-y` side of the tray center.
-
-The bowl uses an edge-grasp retreat from the bowl center toward the robot base. This is necessary because grasping the bowl center is unstable for the gripper geometry. The spoon uses a smaller retreat because it is a narrow elongated object.
-
-### Stage 2: Wipe the Table
-
-After the bowl and spoon are placed in the tray, the robot grasps the cloth and wipes the target dirty region on the left side of the table. The current scripted wipe pattern uses three lanes:
-
-```text
-wipe lane x positions = [0.08, 0.135, 0.19]
-wipe y range = [-0.50, -0.15]
-```
-
-The cloth footprint is approximated as:
-
-```text
-cloth footprint = 0.055 m x 0.115 m
-```
-
-This lane design covers approximately 91.7 percent of the target wipe region under the planned footprint model, while keeping the cloth footprint away from the tissue and vase area. The success threshold is currently set to 90 percent coverage.
+After the target tableware has been cleared, the robot retrieves the cloth and wipes the dirty region. The wiping behavior should cover a sufficient portion of the target surface while maintaining table contact and avoiding protected objects. This stage evaluates tool use, surface coverage, and motion planning in a cluttered tabletop workspace.
 
 ## Expected Outcome and Evaluation
 
-The task is evaluated using placement success, wiping coverage, protected-object stability, and object-drop safety.
+The task will be evaluated using four primary criteria: tableware placement, wiping coverage, protected-object stability, and object safety.
 
 ### 1. Tableware Placement Success
 
-The bowl and spoon must both be inside the tray success zone. For each object, the position must satisfy:
+Let \(N\) be the number of target tableware objects. For each target object \(i\), define an indicator \(P_i\), where \(P_i = 1\) if the object is successfully placed inside the tray region and \(P_i = 0\) otherwise.
+
+The tableware clearing score is:
 
 ```text
-abs(object_x - tray_x) <= 0.12
-abs(object_y - tray_y) <= 0.13
-tray_z - 0.05 <= object_z <= tray_z + 0.10
+Score_clear = (sum_i P_i) / N
 ```
 
-In addition, the current task expects:
-
-```text
-bowl_y > tray_y
-spoon_y < tray_y
-```
-
-A placement score can be reported as:
-
-```text
-Score_clear = number_of_correctly_placed_tableware / number_of_tableware
-```
-
-For the current task, `number_of_tableware = 2`.
+The placement subtask is successful when all target tableware objects are inside the tray region.
 
 ### 2. Wiping Coverage
 
-The target wipe region is discretized into a grid with 0.01 m resolution. A grid cell is considered cleaned if the cloth footprint covers that cell while the cloth is within the contact height range:
+Let \(R_w\) denote the dirty table region and let \(C\) denote the subset of that region covered by the cloth during wiping. The wiping coverage is:
 
 ```text
-wipe contact z range = [0.03, 0.13]
+Coverage = area(C intersection R_w) / area(R_w)
 ```
 
-The coverage metric is:
+The wiping subtask is successful when the coverage is greater than or equal to a predefined threshold.
+
+### 3. Protected-Object Stability
+
+For each protected object \(j\), let \(p_j^0\) be its initial position and \(p_j^T\) be its final position. The displacement is:
 
 ```text
-Coverage = cleaned_target_cells / total_target_cells
+D_j = ||p_j^T - p_j^0||
 ```
 
-The current success threshold is:
+The protected-object constraint is satisfied when every protected object's displacement remains below a predefined tolerance.
 
-```text
-Coverage >= 0.90
-```
+### 4. Object Safety
 
-### 3. Protected Object Stability
+The task should fail if a target object, the cloth, or a protected object falls off the table or is displaced in a way that indicates severe unintended contact. This criterion is included to discourage policies that achieve placement or coverage by using unsafe motions.
 
-The tissue and vase should not be displaced by the robot, the carried objects, or the cloth. Stability is measured by the XY displacement from each object's initial position:
+### Overall Success
 
-```text
-Displacement_i = norm(final_xy_i - initial_xy_i)
-```
+An episode is considered successful when:
 
-The current tolerance is:
-
-```text
-Displacement_i <= 0.035 m
-```
-
-for both the tissue and the vase.
-
-### 4. Object Drop Safety
-
-The task should fail if any task object falls below the table surface. In the current datagen script, an object is treated as fallen if its root z position drops below:
-
-```text
-z < 0.0
-```
-
-### 5. Overall Success Criteria
-
-An episode is successful if all of the following are true:
-
-1. The bowl is placed inside the tray and on the `+y` side of the tray center.
-2. The spoon is placed inside the tray and on the `-y` side of the tray center.
-3. The wipe coverage over the target dirty region is at least 90 percent.
-4. The tissue and vase remain within 0.035 m of their initial XY positions.
-5. No task object falls off the table.
+1. All target tableware objects are placed in the tray.
+2. The dirty region is wiped above the required coverage threshold.
+3. All protected objects remain within the allowed displacement tolerance.
+4. No task object falls off the table or undergoes severe unintended disturbance.
 
 ## Anticipated Challenges
 
-### 1. Multi-stage Task Sequencing
+### 1. Multi-Stage Task Sequencing
 
-The task requires a strict order of operations. The robot must clear the tableware before wiping, because the dirty region initially contains the bowl and spoon. Starting the wipe stage too early may push target objects, block the cloth trajectory, or disturb the protected objects.
+The robot must complete the subtasks in a meaningful order. If the wiping stage begins before the tableware is cleared, the cloth may collide with the tableware or push it into protected objects. The policy must therefore maintain task progress and transition between stages only when the previous stage is complete.
 
-### 2. Object-specific Grasping
+### 2. Object-Specific Grasping
 
-The bowl and spoon require different grasp strategies. The bowl has a curved geometry and is more stable when approached with an edge-biased grasp. The spoon is elongated and thin, so gripper alignment and grasp height are more sensitive. A single generic grasp strategy is unlikely to be robust for both objects.
+The bowl and spoon have different shapes and require different grasping behavior. A bowl is curved and may require stable edge contact, while a spoon is thin and elongated, making it sensitive to gripper alignment. This increases the difficulty of learning a robust manipulation policy.
 
-### 3. Preserving Non-target Objects
+### 3. Role Distinction
 
-The robot must distinguish target objects from protected scene objects. The tissue and vase are not cleanup targets. They should remain fixed even though they are close enough to the robot's workspace to be disturbed by poor approach, transport, or wiping motions.
+The robot must distinguish between target objects, tools, receptacles, and protected objects. This is important because the correct behavior depends not only on object geometry but also on task role. Moving a protected object may be physically easy, but it violates the task objective.
 
-### 4. Wiping Coverage
+### 4. Wiping as Area Coverage
 
-Unlike a placement-only task, wiping is evaluated over an area rather than a point target. The cloth must cover enough of the dirty region while maintaining table contact. The trajectory must balance coverage, reachability, and obstacle clearance.
+Wiping is evaluated over a surface region rather than a single target pose. The robot must keep the cloth in contact with the table and generate motions that cover enough of the dirty region. This requires a different success representation from standard pick-and-place tasks.
 
-### 5. Rigid Cloth Approximation
+### 5. Disturbance Avoidance
 
-The current cloth is represented as a rigid object with an approximate footprint. This makes the task tractable in simulation but differs from real deformable cloth behavior. A future version may replace this approximation with deformable cloth simulation or a more detailed contact model.
+The table contains protected objects near the robot's workspace. The robot must avoid collisions while carrying tableware and while wiping with the cloth. This is challenging because the robot, grasped objects, and cloth all occupy space and may interact with nearby objects.
 
 ### 6. Demonstration Quality
 
-The dataset must contain temporally smooth and physically plausible trajectories. Large jumps, unstable grasps, or inconsistent success labels can degrade imitation learning performance. This is especially important because the task has multiple stages and delayed success conditions.
+Learning from demonstrations requires trajectories that are temporally smooth, physically plausible, and correctly labeled. Because the task contains multiple stages, an error in an early stage can affect later behavior and lead to ambiguous failure cases.
 
 ## Current Scope and Future Extensions
 
-The current scope intentionally fixes the tray, cloth, tissue, and vase positions. This keeps the task focused on bowl/spoon cleanup and left-table wiping. Future extensions may randomize tray placement, randomize protected-object locations, add more tableware items, or introduce adaptive wiping trajectories that plan around obstacle positions.
+The current scope focuses on a single-arm dining cleanup scenario with two target tableware objects, one tray, one cloth, and protected tabletop objects. This scope is sufficient to study sequencing, role-aware manipulation, constrained placement, and wiping coverage.
+
+Future extensions may increase scene diversity by adding more tableware, randomizing receptacle and protected-object locations, introducing additional obstacle types, or using more realistic deformable cloth dynamics. Another extension is to develop adaptive wiping policies that plan coverage trajectories based on the current table layout rather than following a fixed cleaning pattern.
