@@ -36,11 +36,14 @@ BOWL_SCALE: tuple[float, float, float] = (0.57, 0.57, 0.57)
 SPOON_SCALE: tuple[float, float, float] = (0.62, 0.62, 0.62)
 TRAY_SCALE: tuple[float, float, float] = (0.79, 1.77, 1.0)
 TISSUE_SCALE: tuple[float, float, float] = (1.0, 1.0, 1.0)
-VASE_SCALE: tuple[float, float, float] = (1.0, 1.0, 1.0)
+# model_B07JLBDT51_69323.usd has an XY bbox of 0.169244 m; scale it to a
+# 0.100 m x 0.100 m tabletop footprint.
+VASE_SCALE_FACTOR: float = 0.100 / 0.169244
+VASE_SCALE: tuple[float, float, float] = (VASE_SCALE_FACTOR, VASE_SCALE_FACTOR, VASE_SCALE_FACTOR)
+VASE_DIFFUSE_COLOR: tuple[float, float, float] = (0.78, 0.74, 0.66)
 CLOTH_FOOTPRINT_SIZE: tuple[float, float] = (0.055, 0.115)
-CLOTH_THICKNESS: float = 0.05
+CLOTH_THICKNESS: float = 0.035
 CLOTH_SIZE: tuple[float, float, float] = (*CLOTH_FOOTPRINT_SIZE, CLOTH_THICKNESS)
-VASE_DIFFUSE_COLOR: tuple[float, float, float] = (0.36, 0.52, 0.26)
 RIGID_PROPS = RigidBodyPropertiesCfg(
     disable_gravity=False,
     max_depenetration_velocity=5.0,
@@ -83,7 +86,7 @@ def _bind_preview_surface_material(
     roughness: float = 0.55,
     metallic: float = 0.0,
 ) -> None:
-    """Bind a simple material override to every mesh under ``root_prim``."""
+    """Bind a simple USD PreviewSurface material on top of imported asset materials."""
     stage = root_prim.GetStage()
     looks_path = root_prim.GetPath().AppendChild("Looks")
     UsdGeom.Scope.Define(stage, looks_path)
@@ -126,12 +129,12 @@ def _spawn_rigid_usd(
         cfg.mass_props = mass_props
 
     _ensure_rigid_object_schemas(root_prim)
-    if str(root_prim.GetPath()).endswith("/vase"):
+    if root_prim.GetName() == "vase":
         _bind_preview_surface_material(
             root_prim,
-            name="green_vase_material",
+            name="warm_ceramic_vase_material",
             diffuse_color=VASE_DIFFUSE_COLOR,
-            roughness=0.48,
+            roughness=0.62,
         )
 
     if rigid_props is not None:
@@ -156,6 +159,13 @@ PER_OBJECT_YAW_OFFSET: dict[str, float] = {
     # USD heading correction plus an additional 180-degree rotation requested for placement.
     "spoon": 3.0 * math.pi / 2.0,
 }
+SPOON_FIXED_WORLD_YAW: float = math.pi / 4.0
+SPOON_FIXED_WORLD_ROT: tuple[float, float, float, float] = (
+    math.cos(0.5 * SPOON_FIXED_WORLD_YAW),
+    0.0,
+    0.0,
+    math.sin(0.5 * SPOON_FIXED_WORLD_YAW),
+)
 
 # Dining-room table footprint in task/world XY is approximately
 # x=[0.0, 0.70], y=[-0.65, 0.0].  For this advanced task we use the convention
@@ -205,7 +215,7 @@ class DiningCleanupSceneCfg(SingleArmFrankaTaskSceneCfg):
         prim_path="{ENV_REGEX_NS}/Scene/spoon",
         init_state=RigidObjectCfg.InitialStateCfg(
             pos=(0.22, -0.42, 0.05),
-            rot=(0.0, 0.0, 0.383, 0.924),
+            rot=SPOON_FIXED_WORLD_ROT,
         ),
         spawn=sim_utils.UsdFileCfg(
             func=_spawn_rigid_usd,

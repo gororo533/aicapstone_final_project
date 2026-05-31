@@ -31,6 +31,9 @@ OBJECT_WORLD_X_RANGE = (0.10, 0.24)
 OBJECT_WORLD_Y_RANGE = (-0.50, -0.22)
 MIN_CLEARANCE = 0.040
 MAX_PAIR_DISTANCE = 0.28
+SPOON_WORLD_YAW = math.pi / 4.0
+SPOON_YAW_OFFSET = 3.0 * math.pi / 2.0
+SPOON_RAW_YAW = (SPOON_WORLD_YAW - SPOON_YAW_OFFSET + math.pi) % (2.0 * math.pi) - math.pi
 
 # Top-down footprints after applying the task spawn scale in
 # DiningCleanupEnvCfg.  Bowl/spoon can yaw per episode, so overlap rejection
@@ -131,7 +134,9 @@ def build_entries(count: int, seed: int, video_name: str) -> list[dict]:
         spoon_raw_xy = world_xy_to_raw_xy(spoon_world_xy)
 
         bowl_yaw = rng.uniform(-math.pi, math.pi)
-        spoon_yaw = rng.uniform(-math.pi, math.pi)
+        # The task loader adds the spoon USD yaw offset, so this raw yaw yields
+        # a final world yaw of 45 degrees from +x in every generated episode.
+        spoon_yaw = SPOON_RAW_YAW
         objects = [
             {
                 "object_name": "bowl",

@@ -59,11 +59,11 @@ bowl/model_BalandaBowl_69323.usd
 spoon/model_Kitchen_Spoon_B008H2JLP8_LargeWooden_69323.usd
 tray/model_WhiteUtensilTray_69323.usd
 tissue/model_tissue_001_69323.usd
-vase/model_BlackVaseSmall_1_69323.usd
+vase/model_B07JLBDT51_69323.usd
 ```
 
 cloth 目前改用 `sim_utils.CuboidCfg` 建立穩定的薄片 rigid object，避免原本 `model_tablecloth.usd` 的 particle-cloth schema 在 simulator 啟動時造成初始位置漂移。
-vase asset 本身是黑色材質；env config 會在 spawn 後套用綠色 `UsdPreviewSurface` material override，讓它在 simulator 中和其他物件更容易區分。
+vase 目前使用 `model_B07JLBDT51_69323.usd` 的原生 mesh；其 local bbox 的 z min 為 `0.000 m`，因此固定位置 `z=0.05` 會讓 vase 底部貼齊桌面。task config 會將 vase scale 到約 `0.100 x 0.100 m` 的桌面 footprint。由於此 asset 的原生 material 在 Isaac/RTX material flattening 時可能被錯誤顯示為單一綠色，`dining_cleanup_env_cfg.py` 會在 spawn vase 後綁定一個 warm ceramic `UsdPreviewSurface` 材質，確保 teleoperation/eval 中的顯示穩定。
 
 ### 桌面座標系
 
@@ -96,7 +96,7 @@ packages/simulator/src/simulator/tasks/dining_cleanup/dining_cleanup_env_cfg.py
 | tray | `(0.57, -0.36, 0.05)` |
 | tissue | `(0.35, -0.12, 0.074)` |
 | vase | `(0.35, -0.26, 0.05)` |
-| cloth | `(0.35, -0.43, 0.0625)` |
+| cloth | `(0.35, -0.43, 0.075)` |
 
 中間區域的 y 順序符合需求：
 
@@ -142,10 +142,10 @@ USD bbox / task geometry 與 task scale：
 | spoon | `0.066 x 0.323 x 0.032 m` | `(0.62, 0.62, 0.62)` | `0.041 x 0.200 m` |
 | tray | `0.304 x 0.147 x 0.054 m` | `(0.79, 1.77, 1.00)` | `0.240 x 0.260 m` |
 | tissue | `0.073 x 0.103 x 0.050 m` | `(1.00, 1.00, 1.00)` | `0.073 x 0.103 m` |
-| vase | `0.100 x 0.100 x 0.114 m` | `(1.00, 1.00, 1.00)` | `0.100 x 0.100 m` |
-| cloth | `CuboidCfg(size=(0.055, 0.115, 0.025))` | no USD scale / no z yaw | `0.055 x 0.115 m` |
+| vase | `0.169 x 0.169 x 0.240 m` | `(0.591, 0.591, 0.591)` | `0.100 x 0.100 m` |
+| cloth | `CuboidCfg(size=(0.055, 0.115, 0.050))` | no USD scale / no z yaw | `0.055 x 0.115 m` |
 
-Franka gripper 初始最大開口約為 `0.04 + 0.04 = 0.08 m`。目前 cloth cuboid 的窄邊為 `0.055 m`，可由夾爪夾取窄邊；z 厚度為 `0.025 m`，讓 PhysX 在啟動時有穩定的薄片碰撞幾何，並提高夾取時的接觸厚度。
+Franka gripper 初始最大開口約為 `0.04 + 0.04 = 0.08 m`。目前 cloth cuboid 的窄邊為 `0.055 m`，可由夾爪夾取窄邊；z 厚度為 `0.050 m`，讓 PhysX 在啟動時有穩定的薄片碰撞幾何，並提高夾取時的接觸厚度。
 
 ## Object Pose 生成
 
@@ -194,13 +194,13 @@ python3 scripts/generate_dining_cleanup_object_poses.py \
         "objects": [
             {
                 "object_name": "bowl",
-                "rvec": [0.0, 0.0, -1.242],
-                "tvec": [0.120, -0.447, 0.048]
+                "rvec": [0.0, 0.0, 2.909],
+                "tvec": [-0.225, -0.561, 0.057]
             },
             {
                 "object_name": "spoon",
-                "rvec": [0.0, 0.0, -1.179],
-                "tvec": [0.235, -0.360, 0.054]
+                "rvec": [0.0, 0.0, 2.356],
+                "tvec": [-0.283, -0.339, 0.066]
             }
         ],
         "status": "full"
@@ -213,6 +213,7 @@ python3 scripts/generate_dining_cleanup_object_poses.py \
 - `tvec` 是 raw anchor-frame pose。
 - simulator loader 會用 `ANCHOR_WORLD_POSE = (0.40, 0.10, 0.0)` 轉成 world XY。
 - 因此 `world_xy = raw_tvec_xy + (0.40, 0.10)`。
+- spoon 的 raw yaw 固定為 `3*pi/4`，加上 env config 的 spoon yaw offset `3*pi/2` 後，最終 world yaw 固定為 `pi/4`，也就是與 `+x` 軸夾 `45 deg`。
 - 本 task 的 object pose 只控制 `bowl` 與 `spoon`。
 - `tray`、`tissue`、`vase`、`cloth` 是固定 scene object，不在 object pose JSON 中隨 episode 變動。
 
@@ -222,9 +223,9 @@ python3 scripts/generate_dining_cleanup_object_poses.py \
 
 ```text
 episodes = 500
-bowl world x = [0.100, 0.184]
+bowl world x = [0.100, 0.185]
 bowl world y = [-0.500, -0.220]
-spoon world x = [0.100, 0.162]
+spoon world x = [0.100, 0.163]
 spoon world y = [-0.500, -0.220]
 bowl-spoon world XY distance = [0.220, 0.279]
 scaled footprint clearance min = 0.220
@@ -316,8 +317,8 @@ python3 scripts/visualize_dining_cleanup_layout.py \
 執行 visualization 後會印出：
 
 ```text
-bowl: n=500, x=[0.100, 0.184], y=[-0.500, -0.220]
-spoon: n=500, x=[0.100, 0.162], y=[-0.500, -0.220]
+bowl: n=500, x=[0.100, 0.185], y=[-0.500, -0.220]
+spoon: n=500, x=[0.100, 0.163], y=[-0.500, -0.220]
 table: x=[0.000, 0.700], y=[-0.650, 0.000]
 wipe region: x=[0.040, 0.220], y=[-0.500, -0.150]
 planned cloth/table coverage: 91.7%
@@ -418,7 +419,7 @@ _grasp_anchor_w("cloth") = cloth center
 cloth 固定起始位置：
 
 ```text
-cloth = (0.35, -0.43, 0.0625)
+cloth = (0.35, -0.43, 0.075)
 ```
 
 擦拭區域：
