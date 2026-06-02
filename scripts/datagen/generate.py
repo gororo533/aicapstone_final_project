@@ -82,6 +82,132 @@ TASK_REGISTRY = {
 }
 
 
+class _EpisodeVideoRecorder:
+    """Per-episode mp4 recorder for FSM debugging.
+
+    Spawns an ffmpeg subprocess on `start(idx)`, writes one stitched RGB
+    frame per `add(env)` call (wrist | front, side-by-side), and on
+    `finalize(outcome)` closes the pipe and renames the file to
+    ``ep_NN_<outcome>.mp4``. Recording is *forgiving*: any ffmpeg or
+    tensor error disables the recorder for this episode without raising.
+    """
+
+    def __init__(self, out_dir: str, fps: int = 10, step_hz: int = 60):
+        import os as _os
+
+        self.out_dir = out_dir
+        self.fps = max(1, int(fps))
+        self.capture_stride = max(1, step_hz // self.fps)
+        _os.makedirs(out_dir, exist_ok=True)
+        self.proc = None
+        self.tmp_path = None
+        self._broken = False
+        self._step_counter = 0
+        self._frames = 0
+        self._idx = None
+
+    def start(self, idx: int) -> None:
+        import os as _os
+
+        self._idx = idx
+        self.tmp_path = _os.path.join(self.out_dir, f"ep_{idx:02d}_tmp.mp4")
+        self.proc = None
+        self._broken = False
+        self._step_counter = 0
+        self._frames = 0
+
+    def _spawn(self, width: int, height: int) -> None:
+        import subprocess as _sp
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-s",
+            f"{width}x{height}",
+            "-r",
+            str(self.fps),
+            "-i",
+            "-",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            self.tmp_path,
+        ]
+        try:
+            self.proc = _sp.Popen(cmd, stdin=_sp.PIPE)
+        except (OSError, FileNotFoundError) as exc:
+            print(f"[video] ffmpeg spawn failed: {exc}", flush=True)
+            self._broken = True
+            self.proc = None
+
+    def add(self, env) -> None:
+        if self._broken or self.proc is False:
+            return
+        self._step_counter += 1
+        if self._step_counter % self.capture_stride != 0:
+            return
+        try:
+            import numpy as _np
+
+            wrist = env.scene["wrist"].data.output["rgb"]
+            front = env.scene["front"].data.output["rgb"]
+            w_arr = wrist.cpu().numpy().astype(_np.uint8)[0]
+            f_arr = front.cpu().numpy().astype(_np.uint8)[0]
+            frame = _np.concatenate([w_arr, f_arr], axis=1)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[video] frame grab failed: {exc}", flush=True)
+            self._broken = True
+            return
+        if self.proc is None:
+            h, w = frame.shape[:2]
+            self._spawn(w, h)
+            if self._broken or self.proc is None:
+                return
+        try:
+            self.proc.stdin.write(frame.tobytes())
+            self._frames += 1
+        except (BrokenPipeError, OSError) as exc:
+            print(f"[video] pipe broken after {self._frames} frames: {exc}", flush=True)
+            self._broken = True
+            self.proc = None
+
+    def finalize(self, outcome: str) -> None:
+        import os as _os
+
+        if self.proc is not None:
+            try:
+                self.proc.stdin.close()
+            except Exception:
+                pass
+            try:
+                self.proc.wait(timeout=20)
+            except Exception:
+                try:
+                    self.proc.kill()
+                except Exception:
+                    pass
+        if self.tmp_path and _os.path.exists(self.tmp_path) and self._frames > 0:
+            final_path = _os.path.join(self.out_dir, f"ep_{self._idx:02d}_{outcome}.mp4")
+            _os.replace(self.tmp_path, final_path)
+            print(f"[video] saved {final_path} ({self._frames} frames)", flush=True)
+        elif self.tmp_path and _os.path.exists(self.tmp_path):
+            _os.remove(self.tmp_path)
+        self.proc = None
+        self.tmp_path = None
+
+
 class RateLimiter:
     """Convenience class for enforcing rates in loops."""
 
@@ -368,6 +494,12 @@ def main():
     original_sigint_handler = signal.signal(signal.SIGINT, signal_handler)
     cnt = 1
     success_ID = []
+    # Per-episode video recorder for FSM debugging (writes to host via the mounted workspace).
+    _ep_video_dir = os.environ.get("DATAGEN_VIDEO_DIR", "")
+    _ep_video = _EpisodeVideoRecorder(_ep_video_dir, fps=10, step_hz=args_cli.step_hz) if _ep_video_dir else None
+    _ep_video_idx = 1
+    if _ep_video:
+        _ep_video.start(_ep_video_idx)
     try:
         while simulation_app.is_running() and not simulation_app.is_exiting() and not interrupted:
             with torch.inference_mode():
@@ -391,6 +523,9 @@ def main():
                         current_recorded_demo_count,
                         start_record_state,
                     )
+                    if _ep_video:
+                        _ep_video.finalize("success" if success else "failed")
+                        _ep_video_idx += 1
                     if success:
                         print(f"\033[92m[Data Usage]{cnt}/{len(episodes)} success.\033[0m")
                         success_ID.append(cnt)
@@ -399,6 +534,8 @@ def main():
                         print(f"\033[91m[Data Usage]{cnt}/{len(episodes)} fail.\033[0m")
                     if should_break:
                         break
+                    if _ep_video:
+                        _ep_video.start(_ep_video_idx)
                 else:
                     if not start_record_state:
                         if args_cli.record:
@@ -409,6 +546,8 @@ def main():
                     actions = sm.get_action(env)
                     env.step(actions)
                     sm.advance()
+                    if _ep_video:
+                        _ep_video.add(env)
 
                     if fall_check_object_names and _any_object_fell(
                         env, fall_check_object_names, _FALL_THRESHOLD_Z

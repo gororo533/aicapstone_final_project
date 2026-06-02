@@ -15,6 +15,13 @@ from isaaclab.utils.math import (
     quat_mul,
 )
 
+from pxr import Usd, UsdGeom, Sdf, Gf, Vt
+from simulator.tasks.dining_cleanup.dining_cleanup_env_cfg import (
+    TABLE_SURFACE_Z,
+    _create_wipe_vis_mesh,
+)
+
+
 from leisaac.datagen.state_machine.base import StateMachineBase
 
 _BOWL_NAME = "bowl"
@@ -44,7 +51,7 @@ _IK_DLS_LAMBDA = 0.01
 _HOVER_Z_OFFSET = 0.35
 _LIFT_Z_OFFSET = 0.37
 _RELEASE_Z_OFFSET = 0.15
-_WIPE_CONTACT_Z = 0.065
+_WIPE_CONTACT_Z = 0.05
 _WIPE_HOVER_Z = 0.35
 
 _GRIPPER_DOWN_ROLL_W = math.pi
@@ -83,12 +90,12 @@ _DROP_Y_OFFSET_PER_OBJECT: dict[str, float] = {
 # World-frame table regions.  In this advanced task, +x is the Franka-view
 # right side and -x is the Franka-view left side.
 _LEFT_TABLE_X_RANGE = (0.08, 0.22)
-_LEFT_TABLE_Y_RANGE = (-0.55, -0.1)
-_WIPE_LANES_X = (0.1, 0.15, 0.19)
+_LEFT_TABLE_Y_RANGE = (-0.50, -0.10)
+_WIPE_LANES_X = (0.08, 0.13, 0.18, 0.22)
 _CLOTH_FOOTPRINT_SIZE = (0.055, 0.115)
 _WIPE_REQUIRED_IDEAL_FRACTION = 0.70
 _WIPE_COVERAGE_RESOLUTION = 0.01
-_WIPE_CONTACT_Z_RANGE = (0.03, 0.13)
+_WIPE_CONTACT_Z_RANGE = (0.03, 0.09)
 _STATIC_OBJECT_XY_TOL = 0.035
 _STATIC_OBJECT_INITIAL_XY = {
     _TISSUE_NAME: (0.35, -0.12),
@@ -142,15 +149,15 @@ def _build_events() -> tuple[_EventSpec, ...]:
             _EventSpec("approach_object", _CLOTH_NAME, 130),
             _EventSpec("grasp_object", _CLOTH_NAME, 30),
             _EventSpec("lift_object", _CLOTH_NAME, 110),
-            _EventSpec("move_above_wipe_start", _CLOTH_NAME, 140),
+            _EventSpec("move_above_wipe_start", _CLOTH_NAME, 160),
             _EventSpec("lower_to_wipe", _CLOTH_NAME, 80),
         ]
     )
 
     for lane_idx in range(len(_WIPE_LANES_X)):
-        events.append(_EventSpec("wipe_sweep", str(lane_idx), 230))
+        events.append(_EventSpec("wipe_sweep", str(lane_idx), 250))
         if lane_idx < len(_WIPE_LANES_X) - 1:
-            events.append(_EventSpec("wipe_shift", str(lane_idx), 80))
+            events.append(_EventSpec("wipe_shift", str(lane_idx), 60))
     events.append(_EventSpec("wipe_lift_finish", _CLOTH_NAME, 80))
     return tuple(events)
 
@@ -309,6 +316,29 @@ class DiningCleanupStateMachine(StateMachineBase):
         env.scene.update(dt=env.physics_dt)
         self._rest_ee_pos_w = self._ee_pos_w(robot).clone()
 
+        # ── Wipe-coverage visualization mesh ──────────────────────────────
+        
+        stage = env.sim.stage
+        x_bins = max(1, math.ceil((_LEFT_TABLE_X_RANGE[1] - _LEFT_TABLE_X_RANGE[0]) / _WIPE_COVERAGE_RESOLUTION))
+        y_bins = max(1, math.ceil((_LEFT_TABLE_Y_RANGE[1] - _LEFT_TABLE_Y_RANGE[0]) / _WIPE_COVERAGE_RESOLUTION))
+        self._wipe_vis_x_bins = x_bins
+        self._wipe_vis_y_bins = y_bins
+
+        for idx in range(env.num_envs):
+            origin = env.scene.env_origins[idx]
+            ox, oy = float(origin[0]), float(origin[1])
+            mesh_path = f"/World/envs/env_{idx}/Scene/wipe_vis_plane"
+            if not stage.GetPrimAtPath(mesh_path).IsValid():
+                _create_wipe_vis_mesh(
+                    stage,
+                    mesh_path,
+                    x_range=(ox + _LEFT_TABLE_X_RANGE[0], ox + _LEFT_TABLE_X_RANGE[1]),
+                    y_range=(oy + _LEFT_TABLE_Y_RANGE[0], oy + _LEFT_TABLE_Y_RANGE[1]),
+                    x_bins=x_bins,
+                    y_bins=y_bins,
+                    z= 0.0001,
+                )
+
     def check_success(self, env) -> bool:
         status = self._success_status(env)
         self._print_success_status(status)
@@ -367,28 +397,53 @@ class DiningCleanupStateMachine(StateMachineBase):
         }
 
     def _print_success_status(self, status: dict[str, torch.Tensor]) -> None:
-        def word(name: str) -> str:
-            return "success" if bool(status[name].all().item()) else "fail"
+        RED = "\033[91m"
+        GREEN = "\033[92m"
+        RESET = "\033[0m"
 
-        coverage_values = status["coverage_ratio"].detach().cpu().tolist()
-        coverage_text = ", ".join(f"{value:.3f}" for value in coverage_values)
+        def word(name: str) -> str:
+            ok = bool(status[name].all().item())
+            color = GREEN if ok else RED
+            text = "PASS" if ok else "FAIL"
+            return f"{color}{text}{RESET}"
+
+        def line(key: str, value: str, indent: int = 0) -> str:
+            return f"{' ' * indent}{key:<24}: {value}"
+
+        coverage_text = ", ".join(
+            f"{v:.3f}"
+            for v in status["coverage_ratio"].detach().cpu().tolist()
+        )
+
         print(
-            "[DiningCleanup FSM] stage status: "
-            f"timeline={word('timeline')}, "
-            f"tableware={word('tableware')} "
-            f"(bowl_xy={word('bowl_xy')}, spoon_xy={word('spoon_xy')}), "
-            f"wiping={word('wiping')} "
-            f"(coverage={coverage_text}, threshold={_WIPE_COVERAGE_THRESHOLD:.3f}, "
-            f"ideal={_WIPE_IDEAL_COVERAGE_RATIO:.3f}, required={_WIPE_REQUIRED_IDEAL_FRACTION:.0%}), "
-            f"tray_stable={word('tray_stable')}, "
-            f"protected={word('protected')}, "
-            f"no_non_tableware_fall={word('no_non_tableware_fall')}, "
-            f"overall={word('overall')}",
+            "\n".join(
+                [
+                    "[DiningCleanup FSM]",
+                    line("timeline", word("timeline")),
+                    line("tableware", word("tableware")),
+                    line("bowl_xy", word("bowl_xy"), indent=2),
+                    line("spoon_xy", word("spoon_xy"), indent=2),
+                    line("wiping", word("wiping")),
+                    line("coverage", f"[{coverage_text}]", indent=2),
+                    line("threshold", f"{_WIPE_COVERAGE_THRESHOLD:.3f}", indent=2),
+                    line("ideal", f"{_WIPE_IDEAL_COVERAGE_RATIO:.3f}", indent=2),
+                    line(
+                        "required",
+                        f"{_WIPE_REQUIRED_IDEAL_FRACTION:.0%}",
+                        indent=2,
+                    ),
+                    line("tray_stable", word("tray_stable")),
+                    line("protected", word("protected")),
+                    line("no_non_tableware_fall", word("no_non_tableware_fall")),
+                    line("overall", word("overall")),
+                ]
+            ),
             flush=True,
         )
 
     def pre_step(self, env) -> None:
         self._update_wipe_coverage(env)
+        self._sync_wipe_vis(env) 
 
     def get_action(self, env) -> torch.Tensor:
         robot = env.scene["robot"]
@@ -498,6 +553,32 @@ class DiningCleanupStateMachine(StateMachineBase):
         self._wipe_covered |= torch.logical_and(covered_now, in_contact[:, None, None])
         return self._wipe_covered.float().mean(dim=(1, 2))
 
+    def _sync_wipe_vis(self, env) -> None:
+        """Write wipe coverage state to USD vertex colors (env 0 only for perf)."""
+        if self._wipe_covered is None:
+            return
+        from pxr import Gf, UsdGeom, Vt
+
+        stage = env.sim.stage
+        # Only visualize env 0 to avoid per-frame USD writes for all envs
+        env_idx = 0
+        mesh_path = f"/World/envs/env_{env_idx}/Scene/wipe_vis_plane"
+        prim = stage.GetPrimAtPath(mesh_path)
+        if not prim.IsValid():
+            return
+
+        state = self._wipe_covered[env_idx].float()   # (x_bins, y_bins)
+        # heatmap: 0=dirty(blue) → 1=clean(red-green peak)
+        c = state.cpu()
+        colors = []
+        for i in range(c.shape[0]):
+            for j in range(c.shape[1]):
+                v = float(c[i, j])
+                colors.append(Gf.Vec3f(v, 0.2 * v, 1.0 - v))
+
+        attr = UsdGeom.Mesh(prim).GetDisplayColorAttr()
+        attr.Set(Vt.Vec3fArray(colors))
+
     def _grasp_anchor_w(self, obj_name: str, obj_pos_w: torch.Tensor, robot_root_pos_w: torch.Tensor) -> torch.Tensor:
         if obj_name == _CLOTH_NAME:
             return obj_pos_w.clone()
@@ -576,9 +657,9 @@ class DiningCleanupStateMachine(StateMachineBase):
     def _phase_move_above_wipe_start(self, env):
         x, y = self._wipe_lane_endpoint(0, at_end=False)
         target = self._wipe_point_w(env, x, y, _WIPE_HOVER_Z)
-        if self._initial_ee_pos_w is not None:
-            alpha = self._phase_alpha()
-            target = (1.0 - alpha) * self._initial_ee_pos_w + alpha * target
+        # if self._initial_ee_pos_w is not None:
+        #     alpha = self._phase_alpha()
+        #     target = (1.0 - alpha) * self._initial_ee_pos_w + alpha * target
         return target, _constant_gripper(env.num_envs, env.device, _GRIPPER_CLOSE)
 
     def _phase_lower_to_wipe(self, env):
@@ -590,20 +671,20 @@ class DiningCleanupStateMachine(StateMachineBase):
     def _phase_wipe_sweep(self, env, lane_idx: int):
         x0, y0 = self._wipe_lane_endpoint(lane_idx, at_end=False)
         x1, y1 = self._wipe_lane_endpoint(lane_idx, at_end=True)
-        alpha = self._phase_alpha()
-        x = (1.0 - alpha) * x0 + alpha * x1
-        y = (1.0 - alpha) * y0 + alpha * y1
-        return self._wipe_point_w(env, x, y, _WIPE_CONTACT_Z), _constant_gripper(
+        # alpha = self._phase_alpha()
+        # x = (1.0 - alpha) * x0 + alpha * x1
+        # y = (1.0 - alpha) * y0 + alpha * y1
+        return self._wipe_point_w(env, x1, y1, _WIPE_CONTACT_Z), _constant_gripper(
             env.num_envs, env.device, _GRIPPER_CLOSE
         )
 
     def _phase_wipe_shift(self, env, lane_idx: int):
         x0, y0 = self._wipe_lane_endpoint(lane_idx, at_end=True)
         x1, y1 = self._wipe_lane_endpoint(lane_idx + 1, at_end=False)
-        alpha = self._phase_alpha()
-        x = (1.0 - alpha) * x0 + alpha * x1
-        y = (1.0 - alpha) * y0 + alpha * y1
-        return self._wipe_point_w(env, x, y, _WIPE_CONTACT_Z), _constant_gripper(
+        # alpha = self._phase_alpha()
+        # x = (1.0 - alpha) * x0 + alpha * x1
+        # y = (1.0 - alpha) * y0 + alpha * y1
+        return self._wipe_point_w(env, x1, y1, _WIPE_CONTACT_Z), _constant_gripper(
             env.num_envs, env.device, _GRIPPER_CLOSE
         )
 
