@@ -597,7 +597,7 @@ def _init_wipe_vis_mesh(env) -> None:
                 y_range=(oy + LEFT_TABLE_Y_RANGE[0], oy + LEFT_TABLE_Y_RANGE[1]),
                 x_bins=x_bins,
                 y_bins=y_bins,
-                z=0.0001,
+                z=0.045,
             )
 
     print(
