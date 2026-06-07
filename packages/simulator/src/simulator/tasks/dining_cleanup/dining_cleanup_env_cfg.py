@@ -415,8 +415,6 @@ def dining_cleanup_success(
     vase_cfg: SceneEntityCfg,
     tray_x_half_width: float,
     tray_y_half_width: float,
-    # cloth_final_xy: tuple[float, float],
-    # cloth_final_tol: float,
     wipe_x_range: tuple[float, float],
     wipe_y_range: tuple[float, float],
     cloth_xy_size: tuple[float, float],
@@ -437,8 +435,6 @@ def dining_cleanup_success(
         vase_cfg=vase_cfg,
         tray_x_half_width=tray_x_half_width,
         tray_y_half_width=tray_y_half_width,
-        # cloth_final_xy=cloth_final_xy,
-        # cloth_final_tol=cloth_final_tol,
         wipe_x_range=wipe_x_range,
         wipe_y_range=wipe_y_range,
         cloth_xy_size=cloth_xy_size,
@@ -463,8 +459,6 @@ def _dining_cleanup_status(
     vase_cfg: SceneEntityCfg,
     tray_x_half_width: float,
     tray_y_half_width: float,
-    # cloth_final_xy: tuple[float, float],
-    # cloth_final_tol: float,
     wipe_x_range: tuple[float, float],
     wipe_y_range: tuple[float, float],
     cloth_xy_size: tuple[float, float],
@@ -497,11 +491,17 @@ def _dining_cleanup_status(
         torch.abs(spoon_pos[:, 0] - tray_pos[:, 0]) <= tray_x_half_width,
         torch.abs(spoon_pos[:, 1] - tray_pos[:, 1]) <= tray_y_half_width,
     )
+    
     tableware_done = torch.logical_and(bowl_in_tray_xy, spoon_in_tray_xy)
 
     # final_xy = torch.tensor(cloth_final_xy, dtype=cloth_pos.dtype, device=cloth_pos.device)
     # cloth_dist = torch.norm(cloth_pos[:, :2] - final_xy, dim=1)
     # cloth_final_done = cloth_dist <= cloth_final_tol
+
+    cloth_in_tray_xy = torch.logical_and(
+        torch.abs(cloth_pos[:, 0] - tray_pos[:, 0]) <= tray_x_half_width,
+        torch.abs(cloth_pos[:, 1] - tray_pos[:, 1]) <= tray_y_half_width,
+    )
 
     coverage_ratio = _update_wipe_coverage_ratio(
         env,
@@ -513,8 +513,7 @@ def _dining_cleanup_status(
         contact_z_range=wipe_contact_z_range,
     )
     coverage_done = coverage_ratio >= wipe_coverage_threshold
-    wiping_done = coverage_done
-    # wiping_done = torch.logical_and(cloth_final_done, coverage_done)
+    wiping_done = torch.logical_and(cloth_in_tray_xy, coverage_done)
 
     tissue_initial = torch.tensor(tissue_initial_xy, dtype=tissue_pos.dtype, device=tissue_pos.device)
     vase_initial = torch.tensor(vase_initial_xy, dtype=vase_pos.dtype, device=vase_pos.device)
@@ -532,7 +531,7 @@ def _dining_cleanup_status(
         "bowl_xy": bowl_in_tray_xy,
         "spoon_xy": spoon_in_tray_xy,
         "tableware": tableware_done,
-        # "cloth_final": cloth_final_done,
+        "cloth_xy": cloth_in_tray_xy,
         "coverage": coverage_done,
         "wiping": wiping_done,
         "tissue_stable": tissue_stable,
@@ -588,6 +587,7 @@ def _print_dining_cleanup_status(prefix: str, status: dict[str, torch.Tensor]) -
             f"        Spoon XY  : {word('spoon_xy')}",
             "",
             f"  Wiping    : {word('wiping')}",
+            f"        Cloth XY  : {word('cloth_xy')}",
             f"        Coverage  : {word('coverage')}",
             f"        Ratio     : {coverage_text}",
             f"        Threshold : {WIPE_COVERAGE_THRESHOLD:.3f}",
